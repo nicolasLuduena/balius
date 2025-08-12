@@ -1,0 +1,5 @@
+#!/bin/bash
+
+CARGO_PROJECT_DIR=~/Documents/work/balius
+
+cargo run --manifest-path "$CARGO_PROJECT_DIR/Cargo.toml" --bin cargo-balius -- "$@"
