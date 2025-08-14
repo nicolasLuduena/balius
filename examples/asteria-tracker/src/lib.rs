@@ -55,7 +55,6 @@ fn handle_utxo(config: sdk::Config<Config>, utxo: sdk::Utxo<Datum>) -> sdk::Work
     let tx_hash = hex::encode(utxo.tx_hash);
     let output_index = utxo.index;
     let out_ref = format!("{tx_hash}#{output_index}");
-    worker::logging::log(worker::logging::Level::Info, "Handling UTxO", &out_ref);
 
     let utxo_addr = hex::encode(utxo.utxo.address.into_bytes());
 
@@ -77,7 +76,7 @@ fn handle_utxo(config: sdk::Config<Config>, utxo: sdk::Utxo<Datum>) -> sdk::Work
         }
 
         if !is_valid {
-            worker::logging::log(worker::logging::Level::Debug, "Invalid UTxO", &out_ref);
+            worker::logging::log(worker::logging::Level::Debug, "Invalid ship UTxO", &out_ref);
             return Ok(());
         }
 
