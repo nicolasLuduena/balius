@@ -10,6 +10,7 @@ use utxorpc_spec::utxorpc::v1alpha::cardano::{big_int, PlutusData};
 #[derive(Serialize, Deserialize, Clone)]
 struct Config {
     discord_webhook: String,
+    asteria_hex_address: String,
     spacetime_hex_address: String,
     ship_policy: String,
     fuel_policy: String,
@@ -176,6 +177,68 @@ fn kvget(
     }))
 }
 
+fn handle_tx(config: sdk::Config<Config>, tx: sdk::Tx) -> sdk::WorkerResult<()> {
+    // tx.tx has type Tx (utxorpc_spec)
+    // https://docs.rs/utxorpc-spec/latest/utxorpc_spec/utxorpc/v1alpha/cardano/struct.Tx.html
+
+    let mut is_mine_asteria = false;
+    let mut ship_asset_name = String::new();
+    let mut asteria_input_pot = 0;
+    for input in &tx.tx.inputs {
+        // output is TxInput (utxorpc_spec)
+        if let Some(output) = &input.as_output {
+            let addr = hex::encode(output.address.into_bytes());
+            if addr == config.asteria_hex_address {
+                // an Asteria input is involved. it can be:
+                // - create ship
+                // - mine Asteria
+                // - admin operations such as adding funds
+
+                // is it mine Asteria? check if it is burning a SHIP token
+                for masset in &tx.tx.mint {
+                    let policy = hex::encode(masset.policy_id.into_bytes());
+                    if policy == config.ship_policy {
+                        // asset has type Asset (utxorpc_spec)
+                        let asset = masset.assets.first().unwrap();
+                        is_mine_asteria = asset.mint_coin == -1;
+                        ship_asset_name = String::from_utf8(asset.name.into_bytes()).unwrap();
+                    }
+                }
+
+                // save lovelace amount locked into the Asteria input
+                asteria_input_pot = output.coin;
+            }
+        }
+    }
+
+    if is_mine_asteria {
+        // find the Asteria output to obtain the locked lovelace amount
+        let mut asteria_output_pot = 0;
+        for output in &tx.tx.outputs {
+            let addr = hex::encode(output.address.into_bytes());
+            if addr == config.asteria_hex_address {
+                asteria_output_pot = output.coin;
+            }
+        }
+        // compute the extracted prize
+        let prize = asteria_input_pot - asteria_output_pot;
+        let prize_div = prize / 1_000_000;
+        let prize_mod = prize % 1_000_000;
+
+        let header = format!("🚀 **{ship_asset_name}** mined Asteria!");
+        let payload = json!({
+            "content":
+                format!(
+                    "{header}\n🏆 Prize: {prize_div}.{prize_mod} ADA"
+                )
+        });
+        let url = Url::parse(&config.discord_webhook).unwrap();
+        let _ = HttpRequest::post(url).json(&payload)?.send()?;
+    }
+
+    Ok(())
+}
+
 #[balius_sdk::main]
 fn main() -> Worker {
     balius_sdk::logging::init();
@@ -187,5 +250,12 @@ fn main() -> Worker {
             },
             sdk::FnHandler::from(handle_utxo),
         )
-        .with_request_handler("kvget", sdk::FnHandler::from(kvget))
+        .with_tx_handler(
+            worker::driver::UtxoPattern {
+                address: None,
+                token: None,
+            },
+            sdk::FnHandler::from(handle_tx),
+        )
+       .with_request_handler("kvget", sdk::FnHandler::from(kvget))
 }
